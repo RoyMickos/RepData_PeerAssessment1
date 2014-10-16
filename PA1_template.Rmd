@@ -8,18 +8,134 @@ output:
 
 ## Loading and preprocessing the data
 
+No preprocessing needed.
+```{r}
+data <- read.csv('activity.csv')
+```
 
 
 ## What is mean total number of steps taken per day?
 
+Begin with calculating daily sums of steps taken, then compute mean and median.
+```{r}
+daily_sum <- tapply(data$steps, data$date, sum, na.rm=TRUE)
+median_daily_steps <- median(daily_sum)
+  mean_daily_steps <- mean(daily_sum)
+```
+
+Use this data to plot a histogram with the input range split into 10 intervals.
+```{r}
+hist(daily_sum,10)
+```
+
+The mean number of steps taken per day is `r round(mean_daily_steps,digits=2)`, and the median daily steps taken is `r median_daily_steps`.
 
 
 ## What is the average daily activity pattern?
 
+First, create an additional column in the data frame that contains the interval column converted to a factor. Then use it to create an average daily activity pattern, then convert it to a format that ggplot understands.
 
+```{r}
+data$interval.factor <- as.factor(data$interval)
+average_daily_activity <- tapply(data$steps, data$interval.factor, mean, na.rm=TRUE)
+daily_activity_profile <- as.data.frame(average_daily_activity)
+daily_activity_profile$intervals <- as.integer(labels(average_daily_activity)[[1]])
+```
+
+Now we can make the plot:
+
+```{r}
+library(ggplot2)
+ggplot(daily_activity_profile, aes(x=intervals, y=average_daily_activity)) + geom_path() + labs(x='',y='Steps', title="Average Daily Activity Profile")
+```
+
+Let's find out from the daily average when was the most active 5 minute period:
+
+```{r}
+busiest <- daily_activity_profile[average_daily_activity == max(daily_activity_profile$average_daily_activity),]
+busy_hour <- floor(busiest$intervals/60)
+busy_minute <- busiest$intervals %% 60
+busy_time <- paste(as.character(busy_hour),as.character(busy_minute), sep=':')
+```
+
+Assuming that we started the measurements at midnight, the most active time of the day was `r busy_time`.
 
 ## Imputing missing values
 
+Let's count the missing values:
 
+```{r}
+missing <- as.data.frame(table(is.na(data$steps)))[2,2]
+missing
+```
+
+We shall apply the following strategy: for each missing value, we substitute it with the already computed average for that interval. This is embodied in the function *replace_missing* which is intended to be used together with the `apply` function:
+
+```{r}
+replace_missing <- function(x, rep_data){
+  if(is.na(x[1])){
+    interval <- as.integer(x[3])
+    val <- rep_data[rep_data$intervals == interval,]
+    x[1] <- as.numeric(val$average_daily_activity)
+  } 
+  as.numeric(x[1])
+}
+
+data$steps.replaced <- apply(data, 1, replace_missing, daily_activity_profile)
+```
+
+Now we can compute the daily sums using the replaced data and compare that to the unreplaced ones.
+
+```{r}
+daily_sum_replaced <- tapply(data$steps.replaced, data$date, sum)
+mean(daily_sum_replaced)
+median(daily_sum_replaced)
+```
+
+We can see that both of these values are higher than their unreplaced ones. It is not evident why this is the case. Since we remove the NA's in the computation of the unimputed values, the number of samples is also adjusted. Also, the median and mean have the same values. Why?
+
+We can see from the histogram plot above that there are a high number of days at the left. Inspecting the daily_sum variable shows that there are a high number of days with no recorded activity:
+
+```{r}
+daily_sum
+```
+
+These days get all replaced by the averaged profile, which has the same mean as the mean of all samples. Thus, there are a lot of days whose steps equal the mean, and since they appear around the middle of the ordered distribution it also becomes the median.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+Let's first classify the data between workdays and weekends. Define a helper function for this as follows:
+
+```{r}
+wkday <- function(x) {
+  ddate <- weekdays(as.Date(x))
+  classifier <- function(d) {
+    if (d %in% c("Saturday","Sunday")){
+      "weekend"
+    } else {
+      "weekday"
+    }
+  }
+  as.factor(mapply(classifier, ddate))
+}
+```
+
+We'll use this function to create a new factor which we append as a new column in our data. We can now perform the same computation as earlier, this time using the new factorial.
+
+```{r}
+data$day.class <- wkday(data$date)
+days_compared <- tapply(data$steps.replaced, list(data$day.class,data$interval.factor), mean)
+```
+
+Now let's not bother to massage this into a format that ggplot would understand, instead use base plotting:
+
+```{r fig.height=8}
+days_compared <- as.data.frame(t(days_compared))
+days_compared$interval <- as.integer(labels(days_compared)[[1]])
+par(mfrow=c(2,1))
+plot(days_compared$interval, days_compared$weekday, type='l', main="Weekday activity",
+     xlab="", ylab="Steps")
+plot(days_compared$interval, days_compared$weekend, type='l', main="Weekend activity",
+          xlab="", ylab="Steps")
+
+```
